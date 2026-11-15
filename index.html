@@ -50,6 +50,7 @@ details p,details li{font-size:14px;color:var(--muted)}
 details ul{margin:6px 0 0;padding-left:20px}
 label.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px}
 :focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+pre{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -57,7 +58,7 @@ label.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px}
 <div class="wrap">
   <header>
     <h1>Invia al <span>Code 50</span></h1>
-    <p class="muted">Collega l'ampli e il tono parte da solo. Funziona con Chrome su Android o su PC.</p>
+    <p class="muted">Collega l'ampli e il tono parte da solo. Funziona con Chrome su Android o su PC. Versione 2.</p>
   </header>
 
   <section class="card tone">
@@ -96,10 +97,16 @@ label.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px}
       <summary>Se non funziona</summary>
       <ul>
         <li><b>USB:</b> serve un cavo dati (non di sola ricarica) e l'ampli acceso. Quando Chrome chiede il permesso per i dispositivi MIDI, accetta.</li>
-        <li><b>Bluetooth:</b> associa prima l'ampli dalle impostazioni Bluetooth di Android, come per l'app Gateway (sull'ampli: REV e POWER insieme per abilitare l'associazione). Chiudi del tutto Gateway: finché è collegata, l'ampli non si fa trovare.</li>
+        <li><b>Bluetooth, l'ampli non compare in elenco:</b> chiudi del tutto l'app Gateway. Se l'ampli risulta collegato al telefono per l'audio, scollegalo dalle impostazioni Bluetooth di Android (senza dimenticarlo) e riprova: mentre è impegnato può non farsi trovare. In ultima istanza usa "mostra tutti i dispositivi".</li>
+        <li><b>Bluetooth, compare ma non si collega:</b> associa l'ampli dalle impostazioni Bluetooth di Android (sull'ampli: REV e POWER insieme), poi riprova. Se continua a fallire apri "Diagnosi Bluetooth", copia il testo e mandalo a Claude.</li>
         <li><b>Arrivano valori ma con effetto o cassa sbagliati:</b> attiva la casella qui sopra e invia di nuovo.</li>
         <li><b>Il tono cambia ma non resta:</b> i comandi modificano il suono attuale. Per tenerlo, salvalo in un preset dall'ampli con EXIT/STORE.</li>
       </ul>
+    </details>
+    <details id="diagBox">
+      <summary>Diagnosi Bluetooth</summary>
+      <pre id="diag">Nessun tentativo ancora.</pre>
+      <button class="btn" id="copyDiag" type="button">Copia diagnosi</button>
     </details>
     <p class="muted" id="log" role="status"></p>
   </section>
@@ -134,7 +141,11 @@ function toBytes(tone, alt){
 }
 /*--UI--*/
 const SVC = "14839ac4-7d7e-415c-9a42-167340cf2339";
-const WR  = "ba04c4b2-892b-43be-b69c-5d13f2195392";
+const WR  = "ba04c4b2-892b-43be-b69c-5d13f2195392";   // write with response
+const WN  = "8b00ace7-eb0b-49b0-bbe9-9aee0a26e1a3";   // write without response
+const NT  = "0734594a-a8e7-4b1a-a6b1-cd5243059a57";   // notifications from the amp
+const HELLO = [0xF0, 0x00, 0x21, 0x15, 0x7F, 0x7F, 0x7F, 0x10, 0xF7];   // device info request, as the Gateway app sends on connect
+const VERSION = "2";
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let tone = null, link = null, sending = false, sentFor = null, midiAccess = null;
@@ -142,6 +153,10 @@ let tone = null, link = null, sending = false, sentFor = null, midiAccess = null
 function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function log(t){ $("log").textContent = t || ""; }
+const diag = [];
+function d(t){ const n = new Date(); diag.push(String(n.getMinutes()).padStart(2,"0") + ":" + String(n.getSeconds()).padStart(2,"0") + "  " + t); $("diag").textContent = diag.join("\n"); }
+const errText = e => (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
+const hex = v => Array.from(new Uint8Array(v.buffer || v)).slice(0, 24).map(b => b.toString(16).padStart(2, "0")).join(" ");
 function setStatus(t, cls){ $("status").textContent = t; $("dot").className = "dot" + (cls ? " " + cls : ""); }
 function refresh(){ $("send").disabled = !(tone && link) || sending; $("usb").classList.toggle("on", !!link && link.kind === "usb"); $("ble").classList.toggle("on", !!link && link.kind === "ble"); }
 
@@ -176,6 +191,7 @@ async function send(){
     sentFor = tone;
     log("Inviato: " + msgs.length + " comandi. Controlla sul display dell'ampli che modello e cassa siano quelli della ricetta. Per tenerlo, salvalo in un preset con EXIT/STORE.");
   } catch (e) {
+    d("Invio fallito: " + errText(e));
     log("Invio interrotto: " + (e && e.message ? e.message : "collegamento perso") + ". Ricollega e riprova.");
     if (link && link.kind === "ble") { link = null; setStatus("Collegamento Bluetooth perso", "err"); }
   } finally { sending = false; refresh(); }
@@ -202,23 +218,58 @@ async function connectUsb(){
 }
 async function connectBle(all){
   if (!navigator.bluetooth) { setStatus("Questo browser non supporta il Bluetooth", "err"); log("Apri la pagina con Chrome su Android o su PC."); return; }
+  diag.length = 0; d("Pagina v" + VERSION + " · " + navigator.userAgent);
+  let step = "ricerca";
   try {
+    if (navigator.bluetooth.getAvailability) d("Bluetooth disponibile: " + await navigator.bluetooth.getAvailability());
     setStatus("Cerco l'ampli…");
     const dev = await navigator.bluetooth.requestDevice(all
       ? {acceptAllDevices: true, optionalServices: [SVC]}
-      : {filters: [{namePrefix: "CODE"}, {namePrefix: "Code"}, {namePrefix: "Marshall"}], optionalServices: [SVC]});
+      : {filters: [{namePrefix: "CODE"}, {namePrefix: "Code"}, {namePrefix: "Marshall"}, {services: [SVC]}, {services: [0x1802]}], optionalServices: [SVC]});
+    d("Scelto: " + (dev.name || "(senza nome)") + (all ? " · elenco completo" : ""));
     setStatus("Mi collego a " + (dev.name || "ampli") + "…");
-    const server = await dev.gatt.connect();
-    const svc = await server.getPrimaryService(SVC);
-    const ch = await svc.getCharacteristic(WR);
-    dev.addEventListener("gattserverdisconnected", () => { if (link && link.dev === dev) { link = null; setStatus("Bluetooth scollegato", "err"); refresh(); } });
-    link = {kind: "ble", dev, name: dev.name || "Code", send: b => ch.writeValueWithResponse ? ch.writeValueWithResponse(b) : ch.writeValue(b)};
+    step = "collegamento";
+    let server = null;
+    for (let n = 1; n <= 3 && !server; n++) {
+      try { server = await dev.gatt.connect(); d("Collegamento riuscito al tentativo " + n); }
+      catch (e) { d("Collegamento, tentativo " + n + " fallito · " + errText(e)); if (n === 3) throw e; await sleep(700); }
+    }
+    step = "servizio";
+    let svc;
+    try { svc = await server.getPrimaryService(SVC); }
+    catch (e) { d("Servizio non trovato al primo colpo · " + errText(e)); await sleep(800); if (!dev.gatt.connected) await dev.gatt.connect(); svc = await dev.gatt.getPrimaryService(SVC); }
+    d("Servizio di controllo trovato");
+    step = "caratteristica";
+    const wr = await svc.getCharacteristic(WR);
+    d("Scrittura: write=" + wr.properties.write + " senzaRisposta=" + wr.properties.writeWithoutResponse);
+    let wn = null, nt = null;
+    try { wn = await svc.getCharacteristic(WN); d("Canale senza risposta presente"); } catch (e) { d("Canale senza risposta assente · " + errText(e)); }
+    try {
+      nt = await svc.getCharacteristic(NT);
+      let seen = 0;
+      nt.addEventListener("characteristicvaluechanged", ev => { if (seen++ < 6) d("Dall'ampli: " + hex(ev.target.value)); });
+      await nt.startNotifications(); d("Notifiche attive");
+    } catch (e) { d("Notifiche non attivate · " + errText(e)); }
+    const write = async b => {
+      try { if (wr.writeValueWithResponse) await wr.writeValueWithResponse(b); else await wr.writeValue(b); }
+      catch (e) {
+        if (!wn) throw e;
+        d("Scrittura con risposta fallita, provo senza · " + errText(e));
+        if (wn.writeValueWithoutResponse) await wn.writeValueWithoutResponse(b); else await wn.writeValue(b);
+      }
+    };
+    step = "prima scrittura";
+    try { await write(new Uint8Array(HELLO)); d("Saluto inviato"); } catch (e) { d("Saluto rifiutato · " + errText(e)); }
+    dev.addEventListener("gattserverdisconnected", () => { d("Scollegato dall'ampli"); if (link && link.dev === dev) { link = null; setStatus("Bluetooth scollegato", "err"); refresh(); } });
+    link = {kind: "ble", dev, name: dev.name || "Code", send: write};
     setStatus("Collegato in Bluetooth: " + link.name, "ok"); log(""); refresh();
+    await sleep(300);
     if (tone && sentFor !== tone) send();
   } catch (e) {
-    const name = e && e.name;
-    if (name === "NotFoundError") { setStatus("Nessun ampli scelto", "err"); log("Se l'ampli non compare in elenco: chiudi Gateway, controlla che sia associato nel Bluetooth di Android, poi prova \"mostra tutti i dispositivi\"."); }
-    else { setStatus("Collegamento Bluetooth non riuscito", "err"); log("L'ampli ha rifiutato il collegamento" + (e && e.message ? " (" + e.message + ")" : "") + ". Chiudi Gateway, associa l'ampli dal Bluetooth di Android e riprova, oppure usa il cavo USB."); }
+    d("Fermo a: " + step + " · " + errText(e));
+    $("diagBox").open = true;
+    if (e && e.name === "NotFoundError" && step === "ricerca") { setStatus("Nessun ampli scelto", "err"); log("Se l'ampli non compare in elenco: chiudi Gateway, scollega l'ampli dall'audio nel Bluetooth di Android e riprova, oppure usa \"mostra tutti i dispositivi\"."); }
+    else { setStatus("Bluetooth non riuscito (" + step + ")", "err"); log("Il collegamento si è fermato alla fase \"" + step + "\". Apri Diagnosi Bluetooth, copia il testo e mandalo a Claude. Intanto puoi usare il cavo USB."); }
     refresh();
   }
 }
@@ -227,6 +278,7 @@ $("usb").addEventListener("click", connectUsb);
 $("ble").addEventListener("click", () => connectBle(false));
 $("bleAll").addEventListener("click", () => connectBle(true));
 $("send").addEventListener("click", send);
+$("copyDiag").addEventListener("click", async () => { const b = $("copyDiag"); try { await navigator.clipboard.writeText(diag.join("\n")); b.textContent = "Copiata"; } catch (e) { b.textContent = "Copia non riuscita: seleziona il testo a mano"; } setTimeout(() => { b.textContent = "Copia diagnosi"; }, 1800); });
 $("load").addEventListener("click", () => { if (showTone($("paste").value, true)) { $("paste").value = ""; $("pasteBox").open = false; } });
 $("alt").checked = lsGet("code50.alt") === "1";
 $("alt").addEventListener("change", () => lsSet("code50.alt", $("alt").checked ? "1" : "0"));
