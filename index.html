@@ -32,6 +32,7 @@ button{cursor:pointer;border-radius:2px}
 .btn{background:transparent;border:1px solid var(--line);padding:13px 14px;text-align:left;font-weight:600}
 .btn small{display:block;font-weight:400;color:var(--muted)}
 .btn.on{border-color:var(--ok)}
+a.btn{display:block;text-decoration:none;color:inherit;border-color:var(--brass)}
 .go{background:var(--brass);color:#1a1509;border:0;padding:16px;font-family:var(--display);font-size:26px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
 .go:disabled{opacity:.4;cursor:default}
 .link{background:none;border:0;padding:0;color:var(--brass);text-decoration:underline;text-align:left;font-size:14px}
@@ -58,7 +59,7 @@ pre{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);white-s
 <div class="wrap">
   <header>
     <h1>Invia al <span>Code 50</span></h1>
-    <p class="muted">Collega l'ampli e il tono parte da solo. Funziona con Chrome su Android o su PC. Versione 2.</p>
+    <p class="muted">Collega l'ampli e il tono parte da solo. Funziona con Chrome su Android o su PC. Versione 3.</p>
   </header>
 
   <section class="card tone">
@@ -77,6 +78,7 @@ pre{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);white-s
 
   <section class="card">
     <h2>Collegamento</h2>
+    <a class="btn" id="toChrome" href="#" hidden>Apri questa pagina in Chrome<small>In questo browser il Bluetooth per le pagine web è disattivato</small></a>
     <button class="btn" id="usb" type="button">Collega con il cavo USB<small>Cavo dalla presa USB dell'ampli al telefono</small></button>
     <select id="outs" aria-label="Uscita MIDI" hidden></select>
     <button class="btn" id="ble" type="button">Collega in Bluetooth<small>Chiudi prima l'app Marshall Gateway</small></button>
@@ -118,7 +120,9 @@ function decodeTone(input){
   let s = String(input || "").trim();
   const i = s.lastIndexOf("t=");
   if (i >= 0) s = s.slice(i + 2);
-  s = s.replace(/[^A-Za-z0-9_-]/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  s = s.replace(/[^A-Za-z0-9_-]/g, "");
+  const code = s;
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
   if (!s) return null;
   while (s.length % 4) s += "=";
   let obj;
@@ -134,7 +138,12 @@ function decodeTone(input){
     if (!Array.isArray(x) || !ok(x[0]) || !ok(x[1])) return null;
     m.push({c: x[0], v: x[1], n: String(x[2] || "CC " + x[0]).slice(0, 60), a: ok(x[3]) ? x[3] : null});
   }
-  return {t: String(obj.t || "Tono").slice(0, 80), m};
+  return {t: String(obj.t || "Tono").slice(0, 80), m, code};
+}
+/* Android link that opens this same page in Google Chrome, whatever the default browser is.
+   The tone travels in the query string because an intent link uses the fragment for itself. */
+function chromeIntent(host, path, code){
+  return "intent://" + host + path + (code ? "?t=" + code : "") + "#Intent;scheme=https;package=com.android.chrome;end";
 }
 function toBytes(tone, alt){
   return tone.m.map(x => [0xB0, x.c, alt && x.a != null ? x.a : x.v]);
@@ -145,7 +154,7 @@ const WR  = "ba04c4b2-892b-43be-b69c-5d13f2195392";   // write with response
 const WN  = "8b00ace7-eb0b-49b0-bbe9-9aee0a26e1a3";   // write without response
 const NT  = "0734594a-a8e7-4b1a-a6b1-cd5243059a57";   // notifications from the amp
 const HELLO = [0xF0, 0x00, 0x21, 0x15, 0x7F, 0x7F, 0x7F, 0x10, 0xF7];   // device info request, as the Gateway app sends on connect
-const VERSION = "2";
+const VERSION = "3";
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let tone = null, link = null, sending = false, sentFor = null, midiAccess = null;
@@ -158,7 +167,14 @@ function d(t){ const n = new Date(); diag.push(String(n.getMinutes()).padStart(2
 const errText = e => (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
 const hex = v => Array.from(new Uint8Array(v.buffer || v)).slice(0, 24).map(b => b.toString(16).padStart(2, "0")).join(" ");
 function setStatus(t, cls){ $("status").textContent = t; $("dot").className = "dot" + (cls ? " " + cls : ""); }
-function refresh(){ $("send").disabled = !(tone && link) || sending; $("usb").classList.toggle("on", !!link && link.kind === "usb"); $("ble").classList.toggle("on", !!link && link.kind === "ble"); }
+const isAndroid = /Android/i.test(navigator.userAgent);
+const isBrave = !!(navigator.brave && typeof navigator.brave.isBrave === "function");
+function offerChrome(show){
+  const a = $("toChrome");
+  a.href = chromeIntent(location.host, location.pathname, tone ? tone.code : "");
+  if (show && isAndroid) a.hidden = false;
+}
+function refresh(){ offerChrome(false); $("send").disabled = !(tone && link) || sending; $("usb").classList.toggle("on", !!link && link.kind === "usb"); $("ble").classList.toggle("on", !!link && link.kind === "ble"); }
 
 function showTone(raw, remember){
   const t = decodeTone(raw);
@@ -268,7 +284,8 @@ async function connectBle(all){
   } catch (e) {
     d("Fermo a: " + step + " · " + errText(e));
     $("diagBox").open = true;
-    if (e && e.name === "NotFoundError" && step === "ricerca") { setStatus("Nessun ampli scelto", "err"); log("Se l'ampli non compare in elenco: chiudi Gateway, scollega l'ampli dall'audio nel Bluetooth di Android e riprova, oppure usa \"mostra tutti i dispositivi\"."); }
+    if (/globally disabled|not supported/i.test((e && e.message) || "")) { offerChrome(true); setStatus("Bluetooth disattivato in questo browser", "err"); log(isAndroid ? "Questo browser non lascia usare il Bluetooth alle pagine web. Tocca \"Apri questa pagina in Chrome\", oppure usa il cavo USB." : "Questo browser non lascia usare il Bluetooth alle pagine web: apri la pagina con Google Chrome, oppure usa il cavo USB."); }
+    else if (e && e.name === "NotFoundError" && step === "ricerca") { setStatus("Nessun ampli scelto", "err"); log("Se l'ampli non compare in elenco: chiudi Gateway, scollega l'ampli dall'audio nel Bluetooth di Android e riprova, oppure usa \"mostra tutti i dispositivi\"."); }
     else { setStatus("Bluetooth non riuscito (" + step + ")", "err"); log("Il collegamento si è fermato alla fase \"" + step + "\". Apri Diagnosi Bluetooth, copia il testo e mandalo a Claude. Intanto puoi usare il cavo USB."); }
     refresh();
   }
@@ -284,9 +301,15 @@ $("alt").checked = lsGet("code50.alt") === "1";
 $("alt").addEventListener("change", () => lsSet("code50.alt", $("alt").checked ? "1" : "0"));
 window.addEventListener("hashchange", () => { if (location.hash.length > 3) showTone(location.hash, true); });
 
-if (location.hash.length > 3) showTone(location.hash, true);
+const fromUrl = location.hash.length > 3 ? location.hash : (/[?&]t=/.test(location.search) ? location.search : "");
+if (fromUrl) showTone(fromUrl, true);
 else { const last = lsGet("code50.tone"); if (last) showTone(last, false); }
 refresh();
+if (isAndroid && isBrave) {
+  offerChrome(true);
+  let jumped = false; try { jumped = sessionStorage.getItem("code50.jump") === "1"; sessionStorage.setItem("code50.jump", "1"); } catch (e) {}
+  if (!jumped) { log("Ti porto in Chrome, dove funziona anche il Bluetooth. Se non succede nulla, tocca \"Apri questa pagina in Chrome\"."); location.href = $("toChrome").href; }
+}
 </script>
 </body>
 </html>
