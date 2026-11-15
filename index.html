@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Invia al Code 50</title>
+<style>
+:root{
+  --bg:#141311; --panel:#1e1c19; --ink:#efe9dc; --muted:#a39d8e; --line:#3a362e;
+  --brass:#dba946; --ok:#58b877; --led:#ff5f42;
+  --display:"Arial Narrow","Roboto Condensed",Impact,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,Menlo,Consolas,"Roboto Mono",monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5}
+.wrap{max-width:640px;margin:0 auto;padding:22px 16px 48px;display:flex;flex-direction:column;gap:18px}
+h1,h2{font-family:var(--display);text-transform:uppercase;margin:0;line-height:1;letter-spacing:.02em}
+h1{font-size:40px;font-weight:800}
+h1 span{color:var(--brass)}
+h2{font-size:20px;color:var(--muted)}
+p{margin:0}
+.card{background:var(--panel);border:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px}
+.card.tone{border-top:4px solid var(--brass)}
+.title{font-family:var(--display);font-size:28px;font-weight:800;text-transform:uppercase;line-height:1.05;overflow-wrap:anywhere}
+.muted{color:var(--muted);font-size:14px}
+button,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;border-radius:2px}
+.btn{background:transparent;border:1px solid var(--line);padding:13px 14px;text-align:left;font-weight:600}
+.btn small{display:block;font-weight:400;color:var(--muted)}
+.btn.on{border-color:var(--ok)}
+.go{background:var(--brass);color:#1a1509;border:0;padding:16px;font-family:var(--display);font-size:26px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.go:disabled{opacity:.4;cursor:default}
+.link{background:none;border:0;padding:0;color:var(--brass);text-decoration:underline;text-align:left;font-size:14px}
+textarea,select{width:100%;background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:2px}
+textarea{min-height:70px;font-family:var(--mono);font-size:12px}
+.status{font-family:var(--mono);font-size:13px;display:flex;gap:8px;align-items:center}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--line);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.err{background:var(--led)}
+.bar{height:6px;background:var(--line)}
+.bar i{display:block;height:100%;width:0;background:var(--brass);transition:width .1s linear}
+ol{margin:0;padding-left:26px;font-family:var(--mono);font-size:12.5px;color:var(--muted);max-height:220px;overflow:auto}
+ol li.sent{color:var(--ink)}
+details summary{cursor:pointer;color:var(--brass)}
+details p,details li{font-size:14px;color:var(--muted)}
+details ul{margin:6px 0 0;padding-left:20px}
+label.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Invia al <span>Code 50</span></h1>
+    <p class="muted">Collega l'ampli e il tono parte da solo. Funziona con Chrome su Android o su PC.</p>
+  </header>
+
+  <section class="card tone">
+    <h2>Tono da inviare</h2>
+    <div id="toneBox">
+      <p class="muted" id="noTone">Nessun tono caricato. Apri questa pagina dal tasto di Ricetta del Tono, oppure incolla qui sotto il codice copiato.</p>
+      <div class="title" id="toneTitle" hidden></div>
+      <p class="muted" id="toneInfo" hidden></p>
+    </div>
+    <details id="pasteBox">
+      <summary>Incolla un codice</summary>
+      <textarea id="paste" aria-label="Codice del tono" placeholder="Incolla il codice o il link copiato da Ricetta del Tono"></textarea>
+      <button class="btn" id="load" type="button">Carica questo tono</button>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>Collegamento</h2>
+    <button class="btn" id="usb" type="button">Collega con il cavo USB<small>Cavo dalla presa USB dell'ampli al telefono</small></button>
+    <select id="outs" aria-label="Uscita MIDI" hidden></select>
+    <button class="btn" id="ble" type="button">Collega in Bluetooth<small>Chiudi prima l'app Marshall Gateway</small></button>
+    <button class="link" id="bleAll" type="button">Il Bluetooth non trova l'ampli: mostra tutti i dispositivi</button>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Non collegato</span></div>
+  </section>
+
+  <button class="go" id="send" type="button" disabled>Invia all'ampli</button>
+  <div class="bar"><i id="bar"></i></div>
+
+  <section class="card">
+    <label class="chk"><input type="checkbox" id="alt"> <span>Usa la numerazione della tabella Marshall v2.1. Attivala solo se dopo l'invio il Pre FX o la cassa sul display non corrispondono alla ricetta.</span></label>
+    <details>
+      <summary>Comandi che verranno inviati</summary>
+      <ol id="list"></ol>
+    </details>
+    <details>
+      <summary>Se non funziona</summary>
+      <ul>
+        <li><b>USB:</b> serve un cavo dati (non di sola ricarica) e l'ampli acceso. Quando Chrome chiede il permesso per i dispositivi MIDI, accetta.</li>
+        <li><b>Bluetooth:</b> associa prima l'ampli dalle impostazioni Bluetooth di Android, come per l'app Gateway (sull'ampli: REV e POWER insieme per abilitare l'associazione). Chiudi del tutto Gateway: finché è collegata, l'ampli non si fa trovare.</li>
+        <li><b>Arrivano valori ma con effetto o cassa sbagliati:</b> attiva la casella qui sopra e invia di nuovo.</li>
+        <li><b>Il tono cambia ma non resta:</b> i comandi modificano il suono attuale. Per tenerlo, salvalo in un preset dall'ampli con EXIT/STORE.</li>
+      </ul>
+    </details>
+    <p class="muted" id="log" role="status"></p>
+  </section>
+</div>
+
+<script>
+/* ---- pure helpers (tested separately) ---- */
+function decodeTone(input){
+  let s = String(input || "").trim();
+  const i = s.lastIndexOf("t=");
+  if (i >= 0) s = s.slice(i + 2);
+  s = s.replace(/[^A-Za-z0-9_-]/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!s) return null;
+  while (s.length % 4) s += "=";
+  let obj;
+  try {
+    const bin = atob(s), bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    obj = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (e) { return null; }
+  if (!obj || !Array.isArray(obj.m) || !obj.m.length || obj.m.length > 80) return null;
+  const ok = n => Number.isInteger(n) && n >= 0 && n <= 127;
+  const m = [];
+  for (const x of obj.m) {
+    if (!Array.isArray(x) || !ok(x[0]) || !ok(x[1])) return null;
+    m.push({c: x[0], v: x[1], n: String(x[2] || "CC " + x[0]).slice(0, 60), a: ok(x[3]) ? x[3] : null});
+  }
+  return {t: String(obj.t || "Tono").slice(0, 80), m};
+}
+function toBytes(tone, alt){
+  return tone.m.map(x => [0xB0, x.c, alt && x.a != null ? x.a : x.v]);
+}
+/*--UI--*/
+const SVC = "14839ac4-7d7e-415c-9a42-167340cf2339";
+const WR  = "ba04c4b2-892b-43be-b69c-5d13f2195392";
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let tone = null, link = null, sending = false, sentFor = null, midiAccess = null;
+
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function log(t){ $("log").textContent = t || ""; }
+function setStatus(t, cls){ $("status").textContent = t; $("dot").className = "dot" + (cls ? " " + cls : ""); }
+function refresh(){ $("send").disabled = !(tone && link) || sending; $("usb").classList.toggle("on", !!link && link.kind === "usb"); $("ble").classList.toggle("on", !!link && link.kind === "ble"); }
+
+function showTone(raw, remember){
+  const t = decodeTone(raw);
+  if (!t) { if (raw) log("Il codice non è valido o è incompleto: copialo di nuovo da Ricetta del Tono."); return false; }
+  tone = t; sentFor = null;
+  $("noTone").hidden = true; $("toneTitle").hidden = false; $("toneInfo").hidden = false;
+  $("toneTitle").textContent = t.t;
+  $("toneInfo").textContent = t.m.length + " comandi pronti.";
+  const ol = $("list"); ol.textContent = "";
+  t.m.forEach(x => { const li = document.createElement("li"); li.textContent = x.n + "  [CC " + x.c + " = " + x.v + "]"; ol.append(li); });
+  $("bar").style.width = "0";
+  if (remember) lsSet("code50.tone", String(raw));
+  log(""); refresh();
+  if (link) send();
+  return true;
+}
+
+async function send(){
+  if (!tone || !link || sending) return;
+  sending = true; refresh();
+  const msgs = toBytes(tone, $("alt").checked), items = $("list").children;
+  for (const li of items) li.className = "";
+  try {
+    for (let i = 0; i < msgs.length; i++) {
+      await link.send(new Uint8Array(msgs[i]));
+      if (items[i]) items[i].className = "sent";
+      $("bar").style.width = Math.round((i + 1) / msgs.length * 100) + "%";
+      await sleep(link.kind === "ble" ? 30 : 15);
+    }
+    sentFor = tone;
+    log("Inviato: " + msgs.length + " comandi. Controlla sul display dell'ampli che modello e cassa siano quelli della ricetta. Per tenerlo, salvalo in un preset con EXIT/STORE.");
+  } catch (e) {
+    log("Invio interrotto: " + (e && e.message ? e.message : "collegamento perso") + ". Ricollega e riprova.");
+    if (link && link.kind === "ble") { link = null; setStatus("Collegamento Bluetooth perso", "err"); }
+  } finally { sending = false; refresh(); }
+}
+
+function useOutput(out){
+  link = {kind: "usb", name: out.name || "MIDI", send: async b => out.send(b)};
+  setStatus("Collegato via USB: " + link.name, "ok"); refresh();
+}
+async function connectUsb(){
+  if (!navigator.requestMIDIAccess) { setStatus("Questo browser non supporta il MIDI", "err"); log("Apri la pagina con Chrome su Android o su PC."); return; }
+  try {
+    midiAccess = await navigator.requestMIDIAccess({sysex: false});
+  } catch (e) { setStatus("Permesso MIDI negato", "err"); log("Chrome ha bisogno del permesso per i dispositivi MIDI: ricarica la pagina e accetta."); return; }
+  const outs = [...midiAccess.outputs.values()];
+  if (!outs.length) { setStatus("Nessun dispositivo MIDI trovato", "err"); log("Controlla che l'ampli sia acceso e che il cavo USB sia un cavo dati."); return; }
+  const sel = $("outs"); sel.textContent = "";
+  outs.forEach((o, i) => { const op = document.createElement("option"); op.value = i; op.textContent = o.name || ("Uscita " + (i + 1)); sel.append(op); });
+  let pick = outs.findIndex(o => /code|marshall/i.test(o.name || "")); if (pick < 0) pick = 0;
+  sel.value = pick; sel.hidden = outs.length < 2;
+  sel.onchange = () => useOutput(outs[+sel.value]);
+  useOutput(outs[pick]); log("");
+  if (tone && sentFor !== tone) send();
+}
+async function connectBle(all){
+  if (!navigator.bluetooth) { setStatus("Questo browser non supporta il Bluetooth", "err"); log("Apri la pagina con Chrome su Android o su PC."); return; }
+  try {
+    setStatus("Cerco l'ampli…");
+    const dev = await navigator.bluetooth.requestDevice(all
+      ? {acceptAllDevices: true, optionalServices: [SVC]}
+      : {filters: [{namePrefix: "CODE"}, {namePrefix: "Code"}, {namePrefix: "Marshall"}], optionalServices: [SVC]});
+    setStatus("Mi collego a " + (dev.name || "ampli") + "…");
+    const server = await dev.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    const ch = await svc.getCharacteristic(WR);
+    dev.addEventListener("gattserverdisconnected", () => { if (link && link.dev === dev) { link = null; setStatus("Bluetooth scollegato", "err"); refresh(); } });
+    link = {kind: "ble", dev, name: dev.name || "Code", send: b => ch.writeValueWithResponse ? ch.writeValueWithResponse(b) : ch.writeValue(b)};
+    setStatus("Collegato in Bluetooth: " + link.name, "ok"); log(""); refresh();
+    if (tone && sentFor !== tone) send();
+  } catch (e) {
+    const name = e && e.name;
+    if (name === "NotFoundError") { setStatus("Nessun ampli scelto", "err"); log("Se l'ampli non compare in elenco: chiudi Gateway, controlla che sia associato nel Bluetooth di Android, poi prova \"mostra tutti i dispositivi\"."); }
+    else { setStatus("Collegamento Bluetooth non riuscito", "err"); log("L'ampli ha rifiutato il collegamento" + (e && e.message ? " (" + e.message + ")" : "") + ". Chiudi Gateway, associa l'ampli dal Bluetooth di Android e riprova, oppure usa il cavo USB."); }
+    refresh();
+  }
+}
+
+$("usb").addEventListener("click", connectUsb);
+$("ble").addEventListener("click", () => connectBle(false));
+$("bleAll").addEventListener("click", () => connectBle(true));
+$("send").addEventListener("click", send);
+$("load").addEventListener("click", () => { if (showTone($("paste").value, true)) { $("paste").value = ""; $("pasteBox").open = false; } });
+$("alt").checked = lsGet("code50.alt") === "1";
+$("alt").addEventListener("change", () => lsSet("code50.alt", $("alt").checked ? "1" : "0"));
+window.addEventListener("hashchange", () => { if (location.hash.length > 3) showTone(location.hash, true); });
+
+if (location.hash.length > 3) showTone(location.hash, true);
+else { const last = lsGet("code50.tone"); if (last) showTone(last, false); }
+refresh();
+</script>
+</body>
+</html>
